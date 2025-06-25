@@ -1,51 +1,53 @@
 from scapy.all import conf, IFACES
 import argparse
 from typing import Any
-from collections import namedtuple
-from winpcapy import *
 
 
-IP_type = b'\x08\x00'
+IP_TYPE = b'\x08\x00'
+BROADCAST_ADDRESS = 'ff:ff:ff:ff:ff:ff'
+RECEIVE_BUFFER_SIZE = 1024
 
 
-def get_ethernet_frame(mac: str, iface: str) -> Any:
-    macs_to_retrieve = ['ff-ff-ff-ff-ff-ff', mac]
+def sniff_ethernet_frame(iface: str) -> Any:
     sock = conf.L2socket(iface=iface, promisc=True)
 
-    l2_bytes = None
-    while not l2_bytes:
-        l2_bytes = sock.recv_raw(1024)[1]
+    frame_in_bytes = None
+    while not frame_in_bytes:
+        _, frame_in_bytes, _ = sock.recv_raw(RECEIVE_BUFFER_SIZE)
 
-    dst_mac = l2_bytes[0:6].hex('-')
-    ether_type = l2_bytes[12:14]
+    return frame_in_bytes
 
-    print(f"The dst mac was: {dst_mac}")
 
+def parse_ethernet_frame(frame: bytes):
+    dst_mac = frame[0:6].hex(':')
+    ether_type = frame[12:14]
+    payload = frame[14:]
+    return dst_mac, ether_type, payload
+
+
+def does_for_me(dst_mac: str, my_mac: str) -> bool:
+    macs_to_retrieve = [my_mac, BROADCAST_ADDRESS]
     if dst_mac in macs_to_retrieve:
-        return ether_type, l2_bytes[14:]
-
-    return -1
+        return True
+    return False
 
 
 def parse_ip_packet(payload: bytes) -> None:
     pass
 
 
-def main() -> int:
+def main() -> None:
     parser = argparse.ArgumentParser(prog='main.py', usage='python %(prog)s [options]')
     parser.add_argument('mac', type=str, help='YOUR MAC ADDRESS')
     parser.add_argument('iface', type=str, help='YOUR IFACE')
     args = parser.parse_args()
 
-    result = get_ethernet_frame(args.mac, args.iface)
-
-    if result == -1:
-        print("Ethernet frame was not for me!")
-        return -1
-    elif result[0] == IP_type:
-        print("IP payload to handle...")
-        parse_ip_packet(result[1])
-        return 0
+    frame_in_bytes = sniff_ethernet_frame(args.iface)
+    dst_mac, ether_type, payload = parse_ethernet_frame(frame_in_bytes)
+    if does_for_me(dst_mac, args.mac):
+        if ether_type == IP_TYPE:
+            parse_ip_packet(payload)
+            print(payload)
 
 
 if __name__ == '__main__':
